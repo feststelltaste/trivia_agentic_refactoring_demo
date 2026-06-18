@@ -1,0 +1,7 @@
+{
+  "allowedPrompts": [],
+  "dangerouslyDisableSandbox": false,
+  "permissions": {
+    "defaultMode": "prompt"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": ["Read(README.md)"]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "file_pattern": ".*\\.java$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/run-approval-test.sh"
+          },
+          {
+            "type": "agent",
+            "prompt": "You are a test analysis agent.\n\nHook input: $ARGUMENTS\n\nA file was just edited. Check whether an approval test ran by searching for any *.received.txt file under the current directory. If none exists, return { \"ok\": true } — no test ran for this edit.\n\nIf a received file exists, find the corresponding *.approved.txt file (same base name) and compare them.\n1. If they are identical, return { \"ok\": true }\n2. If they differ, analyze the diff and return { \"ok\": false, \"reason\": \"<your diagnosis>\" }\n\nIn the reason, explain what the diff means in terms of observable behavior change — not just what lines changed, but what the system now does differently.",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
