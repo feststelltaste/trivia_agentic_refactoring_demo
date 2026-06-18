@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Code Transcript Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 15px; font-weight: 600; }
+  header input[type=file] { font-size: 13px; color: #8b949e; }
+  #stats { font-size: 12px; color: #8b949e; margin-left: auto; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 2px; margin-left: 24px; }
+  .tab { padding: 4px 14px; font-size: 13px; border-radius: 6px; cursor: pointer; color: #8b949e; border: 1px solid transparent; }
+  .tab:hover { color: #e6edf3; }
+  .tab.active { color: #e6edf3; background: #21262d; border-color: #30363d; }
+
+  #drop-zone { border: 2px dashed #30363d; border-radius: 8px; margin: 40px auto; max-width: 500px; padding: 60px; text-align: center; color: #8b949e; cursor: pointer; transition: border-color .2s; }
+  #drop-zone:hover, #drop-zone.drag-over { border-color: #58a6ff; color: #58a6ff; }
+  #drop-zone p { font-size: 15px; margin-bottom: 8px; }
+  #drop-zone small { font-size: 12px; }
+
+  /* ── CHAT VIEW ─────────────────────────────────── */
+  #conversation { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; display: none; }
+  .msg { display: flex; gap: 12px; margin-bottom: 20px; }
+  .msg.assistant { flex-direction: row; }
+  .msg.user { flex-direction: row-reverse; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; margin-top: 2px; }
+  .avatar.claude { background: #cc5200; color: #fff; }
+  .avatar.user  { background: #238636; color: #fff; }
+  .bubble { max-width: 80%; }
+  .bubble-inner { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px 16px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble-inner { background: #1f3a25; border-color: #2ea043; }
+  .meta { font-size: 11px; color: #8b949e; margin-top: 4px; padding: 0 4px; }
+  .msg.user .meta { text-align: right; }
+
+  .tool-block { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; margin-top: 8px; overflow: hidden; font-size: 12px; }
+  .tool-header { background: #161b22; padding: 6px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .tool-header .tool-name { font-weight: 600; color: #79c0ff; }
+  .tool-header .tool-file { color: #8b949e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .tool-header .chevron { color: #8b949e; transition: transform .15s; }
+  .tool-header.open .chevron { transform: rotate(90deg); }
+  .tool-body { padding: 10px 12px; display: none; font-family: monospace; overflow-x: auto; max-height: 400px; overflow-y: auto; }
+  .tool-body.visible { display: block; }
+  .tool-result { border-top: 1px solid #30363d; background: #0a0f15; padding: 8px 0 0; }
+
+  .hook-block { border: 1px solid #30363d; border-radius: 6px; margin-top: 8px; overflow: hidden; }
+  .hook-header { padding: 5px 10px; background: #161b22; font-weight: 600; font-size: 11px; color: #f0883e; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .hook-header .chevron { transition: transform .15s; }
+  .hook-header.open .chevron { transform: rotate(90deg); }
+  .hook-body { padding: 8px 10px; font-family: monospace; font-size: 11px; white-space: pre-wrap; display: none; }
+  .hook-body.visible { display: block; }
+  .hook-passed { color: #3fb950; }
+  .hook-failed { color: #f85149; }
+  .diff-line { display: block; }
+  .diff-line.add { color: #3fb950; background: #0d2a12; }
+  .diff-line.del { color: #f85149; background: #2a0d0d; }
+  .diff-line.hdr { color: #79c0ff; }
+
+  /* ── HOOKS VIEW ─────────────────────────────────── */
+  #hooks-view { display: none; max-width: 900px; margin: 0 auto; padding: 24px 16px 80px; }
+  #hooks-view h2 { font-size: 13px; color: #8b949e; margin-bottom: 20px; font-weight: 400; }
+  .hook-row { border: 1px solid #30363d; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .hook-row.pass { border-color: #2ea043; }
+  .hook-row.fail { border-color: #f85149; }
+  .hook-row-header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #161b22; cursor: pointer; font-size: 13px; }
+  .hook-row.pass .hook-row-header { background: #0d1a10; }
+  .hook-row.fail .hook-row-header { background: #1a0d0d; }
+  .hook-row-header .hr-num  { font-size: 11px; color: #484f58; width: 24px; flex-shrink: 0; }
+  .hook-row-header .hr-ts   { font-size: 11px; color: #8b949e; flex-shrink: 0; }
+  .hook-row-header .hr-file { flex: 1; font-family: monospace; font-size: 12px; color: #e6edf3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hook-row-header .hr-chevron { color: #8b949e; transition: transform .15s; flex-shrink: 0; }
+  .hook-row-header.open .hr-chevron { transform: rotate(90deg); }
+  .hook-row-body { display: none; padding: 10px 14px; font-family: monospace; font-size: 12px; white-space: pre-wrap; border-top: 1px solid #30363d; max-height: 400px; overflow-y: auto; }
+  .hook-row-body.visible { display: block; }
+
+  code { background: #1c2128; border: 1px solid #30363d; border-radius: 4px; padding: 1px 5px; font-family: monospace; font-size: 12px; }
+  pre  { background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 10px; overflow-x: auto; font-family: monospace; font-size: 12px; line-height: 1.5; margin: 6px 0; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
+  .badge.pass { background: #1a3d22; color: #3fb950; border: 1px solid #2ea043; }
+  .badge.fail { background: #3d1a1a; color: #f85149; border: 1px solid #f85149; }
+
+  /* ── AGENT INTERACTION VIEW ────────────────────── */
+  #agent-view { display: none; padding: 24px; overflow-x: auto; }
+  #agent-view h2 { font-size: 14px; color: #8b949e; margin-bottom: 20px; font-weight: 400; }
+
+  .swimlane-wrap { display: flex; gap: 0; min-width: max-content; }
+
+  .lane { flex: 0 0 260px; display: flex; flex-direction: column; align-items: center; }
+  .lane-header { width: 220px; text-align: center; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; margin-bottom: 0; position: sticky; top: 56px; z-index: 5; }
+  .lane-header .agent-type { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; }
+  .lane-header .agent-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
+  .lane-header .agent-name.main  { color: #cc5200; }
+  .lane-header .agent-name.sub   { color: #79c0ff; }
+  .lane-header .agent-name.hook  { color: #f0883e; }
+  .lane-header .agent-desc { font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+  .lane-body { width: 220px; border-left: 2px solid #30363d; margin-top: 0; padding: 0 0 40px; display: flex; flex-direction: column; align-items: center; position: relative; }
+
+  .timeline-connector { width: 2px; height: 24px; background: #30363d; }
+
+  .event-card { width: 200px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 8px 10px; font-size: 12px; position: relative; cursor: default; }
+  .event-card:hover { border-color: #58a6ff; }
+  .event-card .ev-label { font-weight: 600; color: #e6edf3; }
+  .event-card .ev-detail { color: #8b949e; font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .event-card.spawn  { border-color: #388bfd; background: #0d1926; }
+  .event-card.return { border-color: #3fb950; background: #0d2010; }
+  .event-card.tool   { border-color: #30363d; }
+  .event-card.hook   { border-color: #f0883e; background: #1a1208; }
+  .event-card.hook.pass { border-color: #3fb950; background: #0d1a10; }
+  .event-card.hook.fail { border-color: #f85149; background: #1a0d0d; }
+  .event-card .ev-ts { font-size: 10px; color: #484f58; margin-top: 4px; }
+
+  /* arrows between lanes */
+  .arrow-row { display: flex; align-items: center; width: 100%; position: relative; }
+  .arrow-spacer { flex: 1; height: 2px; }
+  .arrow-right { background: linear-gradient(to right, #388bfd, #79c0ff); }
+  .arrow-left  { background: linear-gradient(to left,  #3fb950, #79c0ff); }
+  .arrow-tip-r::after { content: '▶'; color: #79c0ff; font-size: 10px; position: absolute; right: -6px; top: -6px; }
+  .arrow-tip-l::after { content: '◀'; color: #3fb950; font-size: 10px; position: absolute; left: -6px; top: -6px; }
+
+  /* tooltip */
+  .ev-tooltip { display: none; position: absolute; left: 110%; top: 0; z-index: 100; background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; font-size: 12px; min-width: 280px; max-width: 380px; white-space: pre-wrap; word-break: break-word; box-shadow: 0 8px 24px rgba(0,0,0,.6); pointer-events: none; }
+  .event-card:hover .ev-tooltip { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Claude Code Transcript Viewer</h1>
+  <div class="tabs">
+    <div class="tab active" data-view="chat">Chat</div>
+    <div class="tab" data-view="agents">Agent Interactions</div>
+    <div class="tab" data-view="hooks">Hooks</div>
+  </div>
+  <input type="file" id="file-input" accept=".jsonl,.txt" multiple>
+  <span id="stats"></span>
+</header>
+
+<div id="drop-zone">
+  <p>Drop transcript files here</p>
+  <small>Main <code>.jsonl</code> + any <code>tool-results/*.txt</code> files — select all at once for full subagent view</small>
+</div>
+
+<div id="conversation"></div>
+<div id="agent-view"></div>
+<div id="hooks-view"></div>
+
+<script>
+// ── tab switching ──────────────────────────────────────
+let currentView = 'chat';
+function showView(v) {
+  document.getElementById('conversation').style.display = v === 'chat'   ? 'block' : 'none';
+  document.getElementById('agent-view').style.display   = v === 'agents' ? 'block' : 'none';
+  document.getElementById('hooks-view').style.display   = v === 'hooks'  ? 'block' : 'none';
+}
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    currentView = t.dataset.view;
+    showView(currentView);
+  });
+});
+
+// ── file loading ──────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); loadFiles(e.dataTransfer.files); });
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => loadFiles(e.target.files));
+
+function loadFiles(fileList) {
+  const files = Array.from(fileList);
+  if (!files.length) return;
+  const texts = new Array(files.length);
+  let done = 0;
+  files.forEach((file, i) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      texts[i] = e.target.result;
+      if (++done === files.length) parseAll(texts);
+    };
+    reader.readAsText(file);
+  });
+}
+
+// ── parse ─────────────────────────────────────────────
+function parseAll(texts) {
+  const seen = new Set();
+  const lines = [];
+  texts.forEach(text => {
+    (text || '').trim().split('\n').forEach(l => {
+      l = l.trim();
+      if (!l) return;
+      try {
+        const obj = JSON.parse(l);
+        // deduplicate by uuid (same event appears in multiple files)
+        const key = obj.uuid || JSON.stringify(obj).slice(0, 120);
+        if (!seen.has(key)) { seen.add(key); lines.push(obj); }
+      } catch {}
+    });
+  });
+  dropZone.style.display = 'none';
+  renderChat(lines);
+  renderAgents(lines);
+  renderHooks(lines);
+  showView(currentView);
+}
+
+// ══════════════════════════════════════════════════════
+// CHAT VIEW
+// ══════════════════════════════════════════════════════
+function renderChat(lines) {
+  const conv = document.getElementById('conversation');
+  const statsEl = document.getElementById('stats');
+  conv.innerHTML = '';
+
+  // hook events: unified map from attachment events + tool_result entries
+  const hookDetailMap = hookOutputFromLines(lines);
+  const hookProgress = {};
+  Object.entries(hookDetailMap).forEach(([id, hooks]) => { hookProgress[id] = hooks.map(h => h.output); });
+
+  const turns = lines.filter(l =>
+    !l.isSidechain &&
+    (l.type === 'user' || (l.message && l.message.role === 'assistant')) &&
+    l.message
+  );
+
+  let msgCount = 0, toolCount = 0;
+
+  turns.forEach(turn => {
+    const role = turn.message.role;
+    const content = turn.message.content;
+    if (!content) return;
+    const parts = Array.isArray(content) ? content : [{ type: 'text', text: content }];
+    if (parts.every(p => p.type === 'tool_result')) return;
+
+    msgCount++;
+    const msgEl = document.createElement('div');
+    msgEl.className = `msg ${role}`;
+    const avatar = document.createElement('div');
+    avatar.className = `avatar ${role === 'assistant' ? 'claude' : 'user'}`;
+    avatar.textContent = role === 'assistant' ? 'C' : 'U';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const inner = document.createElement('div');
+    inner.className = 'bubble-inner';
+
+    parts.forEach(part => {
+      if (part.type === 'text' && part.text) {
+        const p = document.createElement('div');
+        p.innerHTML = formatText(part.text);
+        inner.appendChild(p);
+      }
+      if (part.type === 'tool_use') {
+        toolCount++;
+        inner.appendChild(renderToolUse(part, hookProgress, lines));
+      }
+    });
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString() : '';
+
+    bubble.appendChild(inner);
+    bubble.appendChild(meta);
+    msgEl.appendChild(avatar);
+    msgEl.appendChild(bubble);
+    conv.appendChild(msgEl);
+  });
+
+  statsEl.textContent = `${msgCount} messages · ${toolCount} tool calls`;
+}
+
+function renderToolUse(part, hookProgress, lines) {
+  const block = document.createElement('div');
+  block.className = 'tool-block';
+  const label = toolLabel(part);
+  const hdr = document.createElement('div');
+  hdr.className = 'tool-header';
+  const hookList = hookProgress[part.id] || [];
+  const anyPass = hookList.some(o => o.includes('PASSED') || o.includes('Golden master'));
+  const anyFail = hookList.some(o => o.includes('FAILED'));
+  const hdBadge = anyFail ? '<span class="badge fail">FAIL</span>' : anyPass ? '<span class="badge pass">PASS</span>' : '';
+  hdr.innerHTML = `<span class="chevron">▶</span><span class="tool-name">${esc(part.name)}</span><span class="tool-file">${esc(label)}</span>${hdBadge}`;
+  const body = document.createElement('div');
+  body.className = 'tool-body';
+  hdr.addEventListener('click', () => { body.classList.toggle('visible'); hdr.classList.toggle('open'); });
+
+  const inputPre = document.createElement('pre');
+  inputPre.textContent = formatInput(part);
+  body.appendChild(inputPre);
+
+  const result = lines.find(l =>
+    l.message && Array.isArray(l.message.content) &&
+    l.message.content.some(p => p.type === 'tool_result' && p.tool_use_id === part.id)
+  );
+  if (result) {
+    const p = result.message.content.find(p => p.type === 'tool_result' && p.tool_use_id === part.id);
+    if (p && p.content) {
+      const resPre = document.createElement('pre');
+      resPre.className = 'tool-result';
+      const txt = typeof p.content === 'string' ? p.content : JSON.stringify(p.content, null, 2);
+      resPre.textContent = txt.length > 3000 ? txt.slice(0, 3000) + '\n… (truncated)' : txt;
+      body.appendChild(resPre);
+    }
+  }
+
+  (hookProgress[part.id] || []).forEach(output => {
+    const hb = document.createElement('div');
+    hb.className = 'hook-block';
+    const hh = document.createElement('div');
+    hh.className = 'hook-header';
+    const passed = output.includes('PASSED') || output.includes('Golden master created');
+    const failed  = output.includes('FAILED');
+    hh.innerHTML = `<span class="chevron">▶</span> Hook output${passed ? '<span class="badge pass">PASS</span>' : ''}${failed ? '<span class="badge fail">FAIL</span>' : ''}`;
+    const hbody = document.createElement('div');
+    hbody.className = 'hook-body';
+    hbody.innerHTML = renderHookOutput(output);
+    if (failed) { hbody.classList.add('visible'); hh.classList.add('open'); }
+    hh.addEventListener('click', () => { hbody.classList.toggle('visible'); hh.classList.toggle('open'); });
+    hb.appendChild(hh);
+    hb.appendChild(hbody);
+    body.appendChild(hb);
+  });
+
+  block.appendChild(hdr);
+  block.appendChild(body);
+  return block;
+}
+
+// ══════════════════════════════════════════════════════
+// AGENT INTERACTION VIEW
+// ══════════════════════════════════════════════════════
+function renderAgents(lines) {
+  const view = document.getElementById('agent-view');
+  view.innerHTML = '';
+
+  // 1. Find all Agent/Skill tool_use calls in the main thread
+  const agentCalls = []; // { toolUseId, description, subagentType, parentUuid, timestamp }
+  lines.forEach(obj => {
+    if (obj.message && obj.message.role === 'assistant') {
+      (obj.message.content || []).forEach(part => {
+        if (part.type === 'tool_use' && (part.name === 'Agent' || part.name === 'Skill')) {
+          const isSkill = part.name === 'Skill';
+          const subagentType = part.input.subagent_type || part.input.skill || 'agent';
+          // description: prefer an explicit input.description; for Skill calls use "skill" as the qualifier
+          const description = part.input.description
+            ? part.input.description
+            : isSkill ? `skill` : subagentType;
+          agentCalls.push({
+            toolUseId: part.id,
+            description,
+            subagentType,
+            parentUuid: obj.uuid,
+            timestamp: obj.timestamp,
+          });
+        }
+      });
+    }
+  });
+
+  // 2. Collect subagent activity from sidechain/meta lines (tool-results files)
+  //    Lines with sourceToolUseID link back to the spawning tool call.
+  //    Group them by sourceToolUseID -> { tools, summary }
+  const subByToolUseId = {}; // toolUseId -> { tools: [], summary: '' }
+  lines.forEach(obj => {
+    // assistant messages from subagent threads have a sourceToolAssistantUUID or attributionSkill
+    const sid = obj.sourceToolUseID;  // on meta user messages that inject skill context
+    const aid = obj.sourceToolAssistantUUID; // on tool_result user messages from subagent
+    // tool_use results carry sourceToolAssistantUUID; trace back to the assistant msg's toolUseId
+    // easier: use attributionSkill + sessionId pattern — just collect all non-main-thread assistant msgs
+    if (obj.message && obj.message.role === 'assistant' && obj.attributionSkill) {
+      const skillKey = obj.attributionSkill;
+      // find which agentCall this belongs to by matching attributionSkill to subagentType
+      const call = agentCalls.find(c => c.subagentType === skillKey || c.description === skillKey);
+      const key = call ? call.toolUseId : skillKey;
+      if (!subByToolUseId[key]) subByToolUseId[key] = { tools: [], summary: '' };
+      (obj.message.content || []).forEach(p => {
+        if (p.type === 'tool_use') {
+          const detail = p.input.file_path || p.input.pattern || p.input.url ||
+                         (p.input.command || '').slice(0, 60) ||
+                         (p.input.query || '').slice(0, 60) || '';
+          subByToolUseId[key].tools.push({ name: p.name, detail });
+        }
+        if (p.type === 'text' && p.text && p.text.length > subByToolUseId[key].summary.length) {
+          subByToolUseId[key].summary = p.text;
+        }
+      });
+    }
+  });
+
+  // 3. Link agentCalls to their subagent data
+  agentCalls.forEach(call => {
+    call.subData = subByToolUseId[call.toolUseId] || subByToolUseId[call.subagentType] || null;
+  });
+
+  // 4. Find hook events tied to Edit/Write tool calls (unified: attachment + tool_result)
+  const hookAttachMap = hookOutputFromLines(lines);
+
+  // 5. Find Edit/Write calls that triggered hooks
+  const editCalls = [];
+  lines.forEach(obj => {
+    if (obj.message && obj.message.role === 'assistant') {
+      (obj.message.content || []).forEach(part => {
+        if (part.type === 'tool_use' && (part.name === 'Edit' || part.name === 'Write')) {
+          const hooks = hookAttachMap[part.id] || [];
+          if (hooks.length) {
+            editCalls.push({ toolUseId: part.id, name: part.name, file: part.input.file_path || '', parentUuid: obj.uuid, timestamp: obj.timestamp, hooks });
+          }
+        }
+      });
+    }
+  });
+
+  if (agentCalls.length === 0 && editCalls.length === 0) {
+    view.innerHTML = '<p style="color:#8b949e;padding:40px">No subagent calls or hook events found in this transcript.</p>';
+    return;
+  }
+
+  // ── build timeline of events ──────────────────────
+  // Each event: { type: 'spawn'|'hook', time, ... }
+  const allEvents = [
+    ...agentCalls.map(c => ({ ...c, evType: 'spawn' })),
+    ...editCalls.map(c => ({ ...c, evType: 'hook' })),
+  ].sort((a, b) => (a.timestamp || '') < (b.timestamp || '') ? -1 : 1);
+
+  // ── build lane columns ────────────────────────────
+  // Lane 0 = main agent
+  // Lane N = subagent N (one per unique agentId)
+  const agentIds = [...new Set(agentCalls.map(c => c.toolUseId))];
+  const laneCount = 1 + agentIds.length + (editCalls.length ? 1 : 0); // main + subs + hook lane
+  const hasHooks = editCalls.length > 0;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'swimlane-wrap';
+
+  // build lane header + body elements
+  const lanes = [];
+  function makeLane(type, name, desc) {
+    const lane = document.createElement('div');
+    lane.className = 'lane';
+    const lh = document.createElement('div');
+    lh.className = 'lane-header';
+    const nameClass = type === 'Main Agent' ? 'main' : type.startsWith('Hook') ? 'hook' : 'sub';
+    lh.innerHTML = `<div class="agent-type">${esc(type)}</div><div class="agent-name ${nameClass}">${esc(name)}</div><div class="agent-desc">${esc(desc)}</div>`;
+    const lb = document.createElement('div');
+    lb.className = 'lane-body';
+    lane.appendChild(lh);
+    lane.appendChild(lb);
+    wrap.appendChild(lane);
+    lanes.push({ el: lane, body: lb, type });
+    return lb;
+  }
+
+  // derive hook lane labels from actual data
+  const bashHookNames  = [...new Set(lines.filter(l => l.type === 'attachment' && l.attachment?.type === 'hook_success').map(l => l.attachment.hookName).filter(Boolean))];
+  const agentHookNames = [...new Set(lines.filter(l => l.type === 'attachment' && l.attachment?.type === 'hook_blocking_error').map(l => l.attachment.hookName).filter(Boolean))];
+  const hasHookAgent   = agentHookNames.length > 0;
+  const bashHookLabel  = bashHookNames[0]  || 'PostToolUse';
+  const agentHookLabel = agentHookNames[0] || 'PostToolUse';
+
+  const mainBody = makeLane('Main Agent', 'Claude', '');
+  const subBodies = agentIds.map((aid, i) => {
+    const call = agentCalls.find(c => c.toolUseId === aid);
+    return makeLane('Subagent', call ? call.subagentType : `Agent ${i+1}`, call ? call.description : '');
+  });
+  const hookBody      = hasHooks     ? makeLane('Hook',       bashHookLabel,  'bash hook')  : null;
+  const hookAgentBody = hasHookAgent ? makeLane('Hook Agent', agentHookLabel, 'agent hook') : null;
+
+  // ── render events ─────────────────────────────────
+  function addSpacer(body, h = 16) {
+    const s = document.createElement('div');
+    s.className = 'timeline-connector';
+    s.style.height = h + 'px';
+    body.appendChild(s);
+  }
+
+  function addCard(body, cls, label, detail, tooltip, ts) {
+    addSpacer(body);
+    const card = document.createElement('div');
+    card.className = `event-card ${cls}`;
+    card.innerHTML = `<div class="ev-label">${esc(label)}</div>${detail ? `<div class="ev-detail">${esc(detail)}</div>` : ''}${ts ? `<div class="ev-ts">${new Date(ts).toLocaleTimeString()}</div>` : ''}${tooltip ? `<div class="ev-tooltip">${esc(tooltip)}</div>` : ''}`;
+    body.appendChild(card);
+    return card;
+  }
+
+  // main agent intro
+  addSpacer(mainBody, 8);
+
+  allEvents.forEach(ev => {
+    if (ev.evType === 'spawn') {
+      const subIdx = agentIds.indexOf(ev.toolUseId);
+      const subBody = subIdx >= 0 ? subBodies[subIdx] : null;
+      const agentData = ev.subData;
+
+      // main: spawn card
+      addCard(mainBody, 'spawn', `Spawn: ${ev.subagentType}`, ev.description, `Spawning subagent\nType: ${ev.subagentType}\nTask: ${ev.description}`, ev.timestamp);
+
+      if (subBody) {
+        // subagent: tool calls
+        addSpacer(subBody, 8);
+        (agentData ? agentData.tools : []).forEach(t => {
+          addCard(subBody, 'tool', t.name, t.detail, `${t.name}\n${t.detail}`, null);
+        });
+        // subagent: return card
+        const summary = agentData ? agentData.summary.slice(0, 200) : '';
+        addCard(subBody, 'return', 'Return result', summary.split('\n')[0].slice(0, 60), summary || 'Returned to main agent', null);
+        // main: result received
+        addCard(mainBody, 'return', 'Result received', ev.subagentType, summary.slice(0, 120), null);
+      }
+    }
+
+    if (ev.evType === 'hook') {
+      // main: edit/write
+      addCard(mainBody, 'tool', ev.name, ev.file.split('/').pop(), `${ev.name}\n${ev.file}`, ev.timestamp);
+      if (hookBody) {
+        ev.hooks.forEach(h => {
+          const cls = h.passed ? 'hook pass' : h.failed ? 'hook fail' : 'hook';
+          const label = h.passed ? 'PASSED' : h.failed ? 'FAILED' : 'Hook ran';
+          addCard(hookBody, cls, label, ev.file.split('/').pop(), h.output.slice(0, 400), null);
+        });
+        // hook agent lane: only shows when there's a blocking error
+        if (hookAgentBody) {
+          const blocking = ev.hooks.find(h => h.failed && h.output.length > 20);
+          if (blocking) {
+            addCard(hookAgentBody, 'hook fail', 'Blocked ✗', ev.file.split('/').pop(), blocking.output.slice(0, 600), null);
+          } else if (ev.hooks.some(h => h.passed)) {
+            addCard(hookAgentBody, 'hook pass', 'OK ✓', ev.file.split('/').pop(), 'Tests passed — no blocking', null);
+          }
+        }
+      }
+    }
+  });
+
+  // add bottom spacers
+  lanes.forEach(l => addSpacer(l.body, 40));
+
+  const passCount = editCalls.reduce((n, c) => n + c.hooks.filter(h => h.passed).length, 0);
+  const failCount = editCalls.reduce((n, c) => n + c.hooks.filter(h => h.failed).length, 0);
+  const title = document.createElement('h2');
+  title.textContent = `${agentCalls.length} subagent call${agentCalls.length !== 1 ? 's' : ''} · ${editCalls.length} hook trigger${editCalls.length !== 1 ? 's' : ''} · ${passCount} passed · ${failCount} failed`;
+  view.appendChild(title);
+  view.appendChild(wrap);
+}
+
+// ══════════════════════════════════════════════════════
+// HOOKS VIEW
+// ══════════════════════════════════════════════════════
+function renderHooks(lines) {
+  const view = document.getElementById('hooks-view');
+  view.innerHTML = '';
+
+  // collect hook_success / hook_blocking_error attachment events
+  // build a map of toolUseID -> {file, ts} from Edit/Write tool calls
+  const toolUseMap = {};
+  lines.forEach(obj => {
+    if (obj.message && obj.message.role === 'assistant') {
+      (obj.message.content || []).forEach(p => {
+        if (p.type === 'tool_use' && (p.name === 'Edit' || p.name === 'Write')) {
+          toolUseMap[p.id] = { file: p.input.file_path || '', ts: obj.timestamp };
+        }
+      });
+    }
+  });
+
+  const hookDetailMap2 = hookOutputFromLines(lines);
+  const hookEvents = [];
+  Object.entries(hookDetailMap2).forEach(([id, hooks]) => {
+    const toolInfo = toolUseMap[id] || {};
+    hooks.forEach(h => {
+      hookEvents.push({
+        ...h,
+        file: toolInfo.file || '',
+        ts: toolInfo.ts,
+        boot: h.output.includes('Golden master created'),
+      });
+    });
+  });
+
+  if (hookEvents.length === 0) {
+    view.innerHTML = '<p style="color:#8b949e;padding:40px">No approval test hook executions found.</p>';
+    return;
+  }
+
+  const passCount = hookEvents.filter(e => e.passed).length;
+  const failCount = hookEvents.filter(e => e.failed).length;
+  const h2 = document.createElement('h2');
+  h2.textContent = `${hookEvents.length} hook execution${hookEvents.length !== 1 ? 's' : ''} · ${passCount} passed · ${failCount} failed`;
+  view.appendChild(h2);
+
+  hookEvents.forEach((ev, i) => {
+    const row = document.createElement('div');
+    row.className = `hook-row ${ev.failed ? 'fail' : ev.passed ? 'pass' : ''}`;
+
+    const badge = ev.blocking ? '<span class="badge fail">BLOCKED</span>'
+                : ev.boot    ? '<span class="badge pass">BOOTSTRAP</span>'
+                : ev.failed  ? '<span class="badge fail">FAIL</span>'
+                : ev.passed  ? '<span class="badge pass">PASS</span>'
+                : '';
+    const fileName = ev.file ? ev.file.split('/').pop() : '—';
+    const shortPath = ev.file ? ev.file.replace(/.*\/src\//, 'src/') : '';
+    const timeStr = ev.ts ? new Date(ev.ts).toLocaleTimeString() : '';
+    const durStr = ev.durationMs ? `${ev.durationMs}ms` : '';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'hook-row-header';
+    hdr.innerHTML = `<span class="hr-num">#${i + 1}</span><span class="hr-ts">${esc(timeStr)}</span><span class="hr-file" title="${esc(ev.file)}">${esc(fileName)}<span style="color:#484f58;font-size:11px;margin-left:6px">${esc(shortPath)}</span></span>${durStr ? `<span style="font-size:11px;color:#484f58">${esc(durStr)}</span>` : ''}${badge}<span class="hr-chevron">▶</span>`;
+
+    const body = document.createElement('div');
+    body.className = 'hook-row-body';
+    body.innerHTML = renderHookOutput(ev.output);
+
+    // auto-expand failures
+    if (ev.failed) { body.classList.add('visible'); hdr.classList.add('open'); }
+
+    hdr.addEventListener('click', () => { body.classList.toggle('visible'); hdr.classList.toggle('open'); });
+    row.appendChild(hdr);
+    row.appendChild(body);
+    view.appendChild(row);
+  });
+}
+
+// ── helpers ───────────────────────────────────────────
+function toolLabel(part) {
+  const i = part.input || {};
+  return i.file_path || i.path || i.command || i.pattern || '';
+}
+function formatInput(part) {
+  const i = part.input || {};
+  if (part.name === 'Edit') return `${i.file_path}\n\n- ${i.old_string}\n+ ${i.new_string}`;
+  if (part.name === 'Write') return i.file_path || '';
+  if (part.name === 'Read')  return i.file_path || '';
+  if (part.name === 'Bash')  return i.command || '';
+  return JSON.stringify(i, null, 2);
+}
+function renderHookOutput(text) {
+  return text.split('\n').map(line => {
+    if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="diff-line add">${esc(line)}</span>`;
+    if (line.startsWith('-') && !line.startsWith('---')) return `<span class="diff-line del">${esc(line)}</span>`;
+    if (line.startsWith('@@')) return `<span class="diff-line hdr">${esc(line)}</span>`;
+    const cls = line.includes('PASSED') || line.includes('Golden master') ? 'hook-passed' : line.includes('FAILED') ? 'hook-failed' : '';
+    return `<span class="${cls}">${esc(line)}</span>`;
+  }).join('\n');
+}
+function formatText(text) {
+  return esc(text)
+    .replace(/```[\s\S]*?```/g, m => `<pre>${m.slice(3,-3).replace(/^[a-z]+\n/,'')}</pre>`)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Build unified hook map from both attachment events (newer Claude Code) and
+// tool_result entries (current format where hook stdout is appended to the result).
+function hookOutputFromLines(lines) {
+  const map = {}; // toolUseId -> [{output, passed, failed, blocking, hookName, durationMs}]
+  function add(id, entry) {
+    if (!id) return;
+    if (!map[id]) map[id] = [];
+    map[id].push(entry);
+  }
+  // Format A: attachment events
+  lines.forEach(obj => {
+    if (obj.type !== 'attachment' || !obj.attachment) return;
+    const a = obj.attachment;
+    if (a.type !== 'hook_success' && a.type !== 'hook_blocking_error') return;
+    const output = a.stdout || (a.blockingError && a.blockingError.blockingError) || a.content || '';
+    add(a.toolUseID, {
+      output, hookName: a.hookName || '', durationMs: a.durationMs,
+      passed:   a.type === 'hook_success' && (output.includes('PASSED') || output.includes('Golden master')),
+      failed:   a.type === 'hook_blocking_error' || output.includes('FAILED'),
+      blocking: a.type === 'hook_blocking_error',
+    });
+  });
+  // Format B: tool_result entries in user messages
+  lines.forEach(obj => {
+    if (obj.type !== 'user' || !obj.message) return;
+    if (!Array.isArray(obj.message.content)) return;
+    obj.message.content.forEach(p => {
+      if (p.type !== 'tool_result') return;
+      const text = typeof p.content === 'string' ? p.content : '';
+      // blocking PreToolUse / PostToolUse hook error
+      if (p.is_error && /^(Pre|Post)ToolUse:/.test(text)) {
+        add(p.tool_use_id, { output: text, passed: false, failed: true, blocking: true, hookName: '', durationMs: null });
+        return;
+      }
+      // hook stdout appended to successful tool result — detect by sentinel keywords
+      const m = /(APPROVAL TEST:|MIKADO GUARD:|FAILURE ANALYSIS)/.exec(text);
+      if (m) {
+        const output = text.slice(m.index).trim();
+        add(p.tool_use_id, {
+          output, hookName: '', durationMs: null,
+          passed:   output.includes('PASSED') || output.includes('Golden master'),
+          failed:   output.includes('FAILED')  || output.includes('MIKADO GUARD'),
+          blocking: false,
+        });
+      }
+    });
+  });
+  return map;
+}
+
+// Auto-load latest.jsonl when served via http-server
+fetch('latest.jsonl?' + Date.now())
+  .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+  .then(text => { if (text.trim()) parseAll([text]); })
+  .catch(() => {});
+</script>
+</body>
+</html>
