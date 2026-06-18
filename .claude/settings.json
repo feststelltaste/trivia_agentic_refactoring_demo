@@ -3,6 +3,17 @@
     "deny": ["Read(README.md)"]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-clean-repo.sh"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
@@ -14,7 +25,7 @@
           },
           {
             "type": "agent",
-            "prompt": "You are a test analysis agent.\n\nHook input: $ARGUMENTS\n\nA file was just edited. Check whether an approval test ran by searching for any *.received.txt file under the current directory. If none exists, return { \"ok\": true } — no test ran for this edit.\n\nIf a received file exists, find the corresponding *.approved.txt file (same base name) and compare them.\n1. If they are identical, return { \"ok\": true }\n2. If they differ, analyze the diff and return { \"ok\": false, \"reason\": \"<your diagnosis>\" }\n\nIn the reason, explain what the diff means in terms of observable behavior change — not just what lines changed, but what the system now does differently.",
+            "prompt": "You are a test analysis agent. A source file was just edited.\n\nSearch the entire project for any approval test output:\n  find . -name '*.received.txt'\n\nIf no received file exists, return { \"ok\": true } — no approval test ran for this edit.\n\nFor each received file found, locate the corresponding approved file (same path and base name, with .approved.txt instead of .received.txt) and compare them.\n\n1. If all received files are identical to their approved counterparts, return { \"ok\": true }\n2. If any differ, return { \"ok\": false, \"reason\": \"<your diagnosis>\" }\n\nIn the reason explain what changed in terms of observable behavior — not just which lines differ, but what the system now does differently.",
             "timeout": 60
           }
         ]
