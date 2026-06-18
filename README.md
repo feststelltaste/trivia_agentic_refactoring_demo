@@ -60,6 +60,16 @@ Both results are returned to the main agent as `additionalContext` before its ne
 - `jq` installed (used by the hook script to parse JSON)
 - Claude Code CLI installed
 
+The quickest path is the included devcontainer — it handles all of the above automatically and routes Claude Code through DeepSeek to keep costs low (see `.devcontainer/devcontainer.json` for the full config).
+
+## Using the devcontainer
+
+1. Set a `DEEPSEEK_API_KEY` environment variable on your host machine.
+2. Open the repo in VS Code and click _Reopen in Container_ when prompted (requires the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension).
+3. The container builds with Java, Maven, jq, and Claude Code pre-installed. Port **8080** is forwarded automatically for the transcript viewer.
+4. Inside the container, Claude Code is already wired to DeepSeek via `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL=deepseek-chat` — no Anthropic API key needed.
+5. Run `claude` in the `/workspace` terminal and jump straight to Step 2 below.
+
 ## Trying it out
 
 ### Step 1: Open the project in Claude Code
