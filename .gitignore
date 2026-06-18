@@ -1,0 +1,10 @@
+target/
+.idea/
+.settings/
+.classpath
+.project
+*.received.txt
+.claude/state/*
+!.claude/state/.gitkeep
+.claude/mikado_output/*
+!.claude/mikado_output/.gitkeep
