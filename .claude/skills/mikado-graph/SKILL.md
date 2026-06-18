@@ -31,14 +31,42 @@ When asked to execute a plan from a `plan_<slug>.md` file, follow the **try → 
 2. Pick one leaf. Attempt the implementation — make the code change.
 3. Verify: run the test suite (or whatever verification is configured for this project).
 4. **If verification fails:**
-   a. Inspect what broke. That failure is a new blocker you did not know about.
-   b. **Revert the code change immediately** (e.g. `git checkout -- <file>`). The codebase must stay green.
-   c. Add a new child node to the current leaf in `plan_<slug>.md` — a `problem` node for the blocker you just discovered.
-   d. Update `plan_<slug>.dot` and re-render `plan_<slug>.svg`.
-   e. The current leaf is no longer a leaf (it now has an open child). Start the loop again from step 1 with the new leaf.
+   a. **Revert the code change immediately** (e.g. `git checkout -- <file>`). The codebase must stay green. Do this BEFORE anything else.
+   b. **Diagnose the root cause** — read the full failure output. Do NOT create a generic "tests fail" node. Identify the *specific* symptom using the table below and assign it the correct node type.
+   c. **Create one node per distinct root cause.** If two tests fail for different reasons, add two separate child nodes.
+   d. **Graph update sequence** (always in this exact order):
+      1. Edit `plan_<slug>.md` — add the new child node(s) to the YAML.
+      2. **Regenerate `plan_<slug>.dot`** by mechanically translating every node in the plan.md YAML into DOT syntax (apply shape/color rules from REFERENCE.md). Node IDs and labels are copied verbatim from the YAML — never invent or rename them. Overwrite the file completely; do not patch the old content.
+      3. Render: `dot -Tsvg plan_<slug>.dot > plan_<slug>.svg`
+      4. Save a versioned snapshot pair (see **Versioned snapshots** below).
+   e. The current leaf is no longer a leaf (it now has open children). Start the loop again from step 1 with the new leaves.
+
+**Failure → node-type classification table**
+
+| Symptom in failure output                                          | Node type | Example label                                                       |
+|--------------------------------------------------------------------|-----------|---------------------------------------------------------------------|
+| Compile error / unresolved symbol after your change                | problem   | "Callers of `foo()` need update after rename"                       |
+| Test assertion fails deterministically (expected X, got Y)         | problem   | "`OrderTest`: expected 3, got 0 — field not initialised"            |
+| Identity vs. equality bug (`==` instead of `.equals()` / `===`)   | problem   | "Reference equality used where value equality required in predicate" |
+| Off-by-one / boundary error                                        | problem   | "Loop iterates N+1 times — last element processed twice"            |
+| Null / undefined dereference on code you didn't touch              | problem   | "Null receiver in `process()` — init sequence broken"               |
+| Implicit type coercion producing wrong value                       | problem   | "String concatenated instead of added — missing numeric cast"       |
+| Mutating shared state that other tests depend on                   | problem   | "Shared list mutated in test — later assertions see stale data"     |
+| Test result differs across runs / flaky / order-dependent          | impact    | "Seed random number generator in test for determinism"              |
+| Time-dependent test (clock, timestamp, expiry)                     | impact    | "Inject a fixed clock — test breaks near midnight"                  |
+| Thread / concurrency ordering assumption                           | impact    | "Race condition in shutdown path — test passes only serially"       |
+| Missing file / resource / config the test depends on               | impact    | "Approval baseline file missing — generate it first"                |
+| External or DB state left dirty by a previous test run             | impact    | "DB not rolled back between tests — isolation broken"               |
+| Reflection / serialization / RPC break (name changed)              | impact    | "Serialised type discriminator still uses old class name"           |
+| Generated or derived artefact out of sync with source              | impact    | "Generated DTO not regenerated after field rename"                  |
+
+For **non-determinism** (random, time, thread ordering): always classify as `impact` (orange node) — it is a hidden coupling to global mutable state outside the code under test. Label the node with the specific call site and what must be controlled (e.g. "Seed `random()` call in `checkout_test.py:88`").
 5. **If verification passes:**
    a. Set the node's `status: done` in `plan_<slug>.md`.
-   b. Update `plan_<slug>.dot` and re-render `plan_<slug>.svg`.
+   b. **Graph update sequence** (always in this exact order):
+      1. **Regenerate `plan_<slug>.dot`** by mechanically translating every node in the plan.md YAML into DOT syntax (apply shape/color rules from REFERENCE.md). Node IDs and labels are copied verbatim from the YAML — never invent or rename them. Overwrite the file completely; do not patch the old content.
+      2. Render: `dot -Tsvg plan_<slug>.dot > plan_<slug>.svg`
+      3. Save a versioned snapshot pair (see **Versioned snapshots** below).
    c. Commit: the node label is the commit message. One node = one commit.
    d. Loop back to step 1.
 6. Stop when the root goal node is the only remaining open node and all its children are done — then attempt the goal itself.
@@ -69,9 +97,10 @@ See REFERENCE.md "Impact checklist" for the full list of areas to probe.
 
 **Discover a problem**
 User says: "I tried [X], hit problem: [Y]" — or the agent's own verification fails during execution.
-Add a problem or impact rectangle node as child of X (use type=impact if it is
-a non-obvious side-effect). If X was a todo leaf, it is no longer a leaf.
+Apply the **Failure → node-type classification table** (see Execution protocol step 4b) to decide
+whether the new node is a `problem` or `impact`. If X was a todo leaf, it is no longer a leaf.
 Revert any partial change before continuing — the codebase must stay green.
+Non-determinism (random, time, thread ordering) is always `impact` (orange node).
 
 **Mark solved**
 User says: "I solved [X]" or "done: [X]"
@@ -84,9 +113,11 @@ Add B's id to A's depends_on list in the YAML. Render as a dashed arrow B -> A
 
 **Show the graph**
 User says: "render" or "show graph" or "update"
-Re-render `.claude/mikado_output/<slug>/plan.dot` from `plan.md`, run:
-  dot -Tsvg .claude/mikado_output/<slug>/plan.dot > .claude/mikado_output/<slug>/plan.svg
-Save a versioned snapshot (see below), then show the DOT block.
+**Graph update sequence** (always in this exact order):
+  1. **Regenerate** `.claude/mikado_output/<slug>/plan.dot` by mechanically translating every node in `plan.md`'s YAML into DOT syntax (apply shape/color rules from REFERENCE.md). Node IDs and labels are copied verbatim from the YAML — never invent or rename them. Overwrite the file completely; do not patch the old content.
+  2. Render: `dot -Tsvg .claude/mikado_output/<slug>/plan.dot > .claude/mikado_output/<slug>/plan.svg`
+  3. Save a versioned snapshot pair (see below).
+Then show the full DOT block in the reply.
 
 **Versioned snapshots**
 Every time plan.dot is (re)written and rendered to SVG, also save numbered copies:
@@ -97,7 +128,8 @@ This gives a full visual history of every graph state, one file pair per change.
 
 ## Rules
 
-- `.claude/mikado_output/<slug>/plan.md` is the source of truth -- edit it, then regenerate plan.dot
+- `plan.md` is the **single source of truth** — always edit plan.md first, then regenerate plan.dot in full from it
+- **Never patch plan.dot in-place.** Regenerate it completely from the plan.md YAML each time. Patching leaves stale content and produces the same SVG as before. Node IDs and labels are always copied verbatim from the YAML — never re-invented during regeneration.
 - All plan files live under `.claude/mikado_output/<slug>/` (gitignored)
 - Slug = kebab-case of the goal, max ~5 words, no special chars except hyphens
 - Store the slug in the YAML frontmatter as field: slug
